@@ -40,19 +40,20 @@ def setup_logger(module: str, number: int = None) -> logging.Logger:
     return logger
 
 
-async def sleep_for_random_time(interval_ms: tuple[int, int]) -> None:
+async def sleep_for_random_time(min_ms: int, max_ms: int) -> None:
     """
     Засыпает на время, выбранное случайным образом из заданного диапазона.
 
     Args:
-        interval_ms (tuple[int, int]): Кортеж диапазона от и до в мс.
+        min_ms (int): Минимальное время в миллисекундах.
+        max_ms (int): Максимальное время в миллисекундах.
 
     Returns:
         None
     """
-    time_ms = randint(*interval_ms)
-    time = time_ms / 1000
-    await sleep(time)
+    delay_ms = randint(min_ms, max_ms)
+    delay_s = delay_ms / 1000
+    await sleep(delay_s)
 
 
 async def decide_ignore_request(chance_pct: int) -> bool:
