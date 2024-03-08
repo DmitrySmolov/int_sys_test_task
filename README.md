@@ -9,6 +9,7 @@
 
 ## Файловая структура
 
+```
 .
 ├── clients
 │   ├── logs
@@ -29,6 +30,7 @@
 ├── README.md
 ├── run_server_and_clients.sh
 └── utils.py
+```
 
 ## Конфигурации
 
