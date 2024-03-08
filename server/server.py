@@ -124,6 +124,10 @@ async def send_keep_alive() -> None:
 
     while True:
         await sleep(serv_const.KA_INTERVAL_S)
+        addrs = []
+        for writer in connected_clients:
+            addr = writer.get_extra_info('peername')
+            addrs.append(addr)
         if not connected_clients:
             continue
         for writer in connected_clients:
@@ -147,7 +151,6 @@ async def main() -> None:
         server = await start_server(
             handle_client_wrapper, HOST, PORT
         )
-        print(f'{module_name} started on {HOST}:{PORT}')
         await sleep(SHUTDOWN_TIMELAPSE)
         await _safe_shutdown(keep_alive_task, server)
 

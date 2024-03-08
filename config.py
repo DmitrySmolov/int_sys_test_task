@@ -35,12 +35,12 @@ class ServerConstants:
     KA_TEXT = 'keepalive'
     KA_TEMPLATE = '[{serial}] {ka_text}\n'
     REGEX_KA_MSG = (
-        r'\[(?P<serial>\d+)\] \((?P<ka_text>{})\)'.format(KA_TEXT)
+        r'\[(?P<serial>\d+)\] (?P<ka_text>{})'.format(KA_TEXT)
     )
 
 
 class LoggerConfig:
-    DATETIMEFMT = "%Y-%m-%d %H:%M:%S:%f"
+    DATETIMEFMT = "%Y-%m-%d %H:%M:%S.%f"
     SERVER_RES_TEMPLATE = (
         '{req_datetime} - {req_text} - {res_datetime} - {res_text};'
     )

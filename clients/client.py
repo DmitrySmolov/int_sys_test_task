@@ -107,7 +107,6 @@ async def main() -> None:
     """
     try:
         reader, writer = await open_connection(HOST, PORT)
-        print(f'Connected to {HOST}:{PORT}')
         writer_task = create_task(client_writer(writer))
         reader_task = create_task(client_reader(reader))
         await sleep(SHUTDOWN_TIMELAPSE)
