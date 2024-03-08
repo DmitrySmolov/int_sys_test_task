@@ -1,19 +1,20 @@
 from asyncio import (
-    create_task, run, sleep, start_server, StreamReader, StreamWriter
+    run, sleep, start_server, StreamReader, StreamWriter, create_task,
 )
 from datetime import datetime
-from os import path
 import re
 
 from config import (
-    HOST, PORT, ENCODING, BUFFER_SIZE, client_constants as cl_const,
-    server_constants as serv_const, logger_config as log_const
+    HOST, PORT, ENCODING, client_constants as cl_const,
+    server_constants as serv_const, logger_config as log_const,
+    SHUTDOWN_TIMELAPSE
 )
 from utils import (
-    decide_ignore_request, Serial, setup_logger, sleep_for_random_time,
+    decide_ignore_request, get_module_name, Serial, setup_logger,
+    sleep_for_random_time,
 )
 
-module_name = path.basename(__file__).split('.')[0]
+module_name = get_module_name(__file__)
 logger = setup_logger(module=module_name)
 
 client_counter = 0
@@ -24,10 +25,79 @@ server_serial = Serial()
 
 
 async def handle_client(
-    reader: StreamReader, writer: StreamWriter
+    reader: StreamReader, writer: StreamWriter, client_id: int
 ) -> None:
     """
     Обработчик клиента.
+
+    Args:
+        reader (StreamReader): Объект чтения.
+        writer (StreamWriter): Объект записи.
+        client_id (int): Идентификатор клиента.
+
+    Returns:
+        None
+    """
+    global server_serial
+    global connected_clients
+
+    connected_clients.add(writer)
+
+    while True:
+        data = await reader.readline()
+        if data:
+            req_datetime = datetime.now()
+            reqest_text = data.decode(ENCODING)
+            ignore = decide_ignore_request(
+                chance_pct=serv_const.REQ_IGNORE_CHANCE_PCT
+            )
+            if not ignore:
+                match = re.match(cl_const.REGEX_REQ_MSG, reqest_text)
+                client_serial = match.group('serial') if match else 'N/A'
+                res_text = serv_const.RES_TEXT
+                await sleep_for_random_time(*serv_const.RES_DELAY_INTERVAL_MS)
+                res_datetime = datetime.now()
+                response_text = serv_const.RES_TEMPLATE.format(
+                    server_serial=server_serial.get(),
+                    client_serial=client_serial,
+                    res_text=res_text,
+                    client_id=client_id
+                )
+                writer.write(response_text.encode(ENCODING))
+                await writer.drain()
+                logger.info(
+                    log_const.SERVER_RES_TEMPLATE.format(
+                        req_datetime=req_datetime.strftime(
+                            log_const.DATETIMEFMT
+                        ),
+                        req_text=reqest_text,
+                        res_datetime=res_datetime.strftime(
+                            log_const.DATETIMEFMT
+                        ),
+                        res_text=response_text
+                    )
+                )
+            elif ignore:
+                logger.info(
+                    log_const.SERVER_IGNORED_REQ_TEMPLATE.format(
+                        req_datetime=req_datetime.strftime(
+                            log_const.DATETIMEFMT
+                        ),
+                        req_text=reqest_text
+                    )
+                )
+        else:
+            connected_clients.remove(writer)
+            writer.close()
+            await writer.wait_closed()
+            break
+
+
+async def handle_client_wrapper(
+    reader: StreamReader, writer: StreamWriter
+) -> None:
+    """
+    Обертка обработчика клиента для получения идентификатора клиента.
 
     Args:
         reader (StreamReader): Объект чтения.
@@ -37,47 +107,9 @@ async def handle_client(
         None
     """
     global client_counter
-    global server_serial
-    global connected_clients
 
-    connected_clients.add(writer)
     client_counter += 1
-    data = await reader.read(BUFFER_SIZE)
-    if data:
-        req_datetime = datetime.now()
-        reqest_text = data.decode(ENCODING)
-        ignore = decide_ignore_request(
-            chance_pct=serv_const.REQ_IGNORE_CHANCE_PCT
-        )
-        if not ignore:
-            match = re.match(cl_const.REGEX_REQ_MSG, reqest_text)
-            client_serial = match.group('serial') if match else 'N/A'
-            res_text = serv_const.RES_TEXT
-            await sleep_for_random_time(*serv_const.RES_DELAY_INTERVAL_MS)
-            res_datetime = datetime.now()
-            response_text = serv_const.RES_TEMPLATE.format(
-                server_serial=server_serial.get(),
-                client_serial=client_serial,
-                res_text=res_text,
-                client_counter=client_counter
-            )
-            writer.write(response_text.encode(ENCODING))
-            await writer.drain()
-            logger.info(
-                log_const.SERVER_RES_TEMPLATE.format(
-                    req_datetime=req_datetime.strftime(log_const.DATETIMEFMT),
-                    req_text=reqest_text,
-                    res_datetime=res_datetime.strftime(log_const.DATETIMEFMT),
-                    res_text=response_text
-                )
-            )
-        elif ignore:
-            logger.info(
-                log_const.SERVER_IGNORED_REQ_TEMPLATE.format(
-                    req_datetime=req_datetime.strftime(log_const.DATETIMEFMT),
-                    req_text=reqest_text
-                )
-            )
+    await handle_client(reader, writer, client_counter)
 
 
 async def send_keep_alive() -> None:
@@ -110,13 +142,37 @@ async def main() -> None:
     Returns:
         None
     """
-    create_task(send_keep_alive())
+    try:
+        keep_alive_task = create_task(send_keep_alive())
+        server = await start_server(
+            handle_client_wrapper, HOST, PORT
+        )
+        print(f'{module_name} started on {HOST}:{PORT}')
+        await sleep(SHUTDOWN_TIMELAPSE)
+        await _safe_shutdown(keep_alive_task, server)
 
-    server = await start_server(
-        handle_client, HOST, PORT
-    )
-    async with server:
-        await server.serve_forever()
+    except KeyboardInterrupt:
+        await _safe_shutdown(keep_alive_task, server)
+
+
+async def _safe_shutdown(keep_alive_task, server) -> None:
+    """
+    Остановка сервера.
+
+    Args:
+        keep_alive_task: Задача отправки keep-alive сообщений.
+        server: Сервер.
+
+    Returns:
+        None
+    """
+    keep_alive_task.cancel()
+    server.close()
+    await server.wait_closed()
+    if connected_clients:
+        for writer in connected_clients:
+            writer.close()
+            await writer.wait_closed()
 
 
 if __name__ == '__main__':
